@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Clinic Token Queue — Dr Qaiser Iqbal</title>
+<!--
+  ============================================================================
+  CLINIC TOKEN / QUEUE CALLING SYSTEM — MVP v0.1 (single-file web app)
+  ============================================================================
+  Views (same file):
+    • App view  (default)          : Call / Tokens / Queue / More tabs
+    • TV view   (?view=tv or #tv)  : full-screen waiting-area display
+  Demo sync : localStorage + BroadcastChannel between tabs of THIS browser
+              (phone tab + TV tab on the same device). No server needed.
+  Live sync : Supabase config is stored in Settings (see cloudSync() stub) —
+              cross-device sync is the NEXT step, not implemented in v0.1.
+  No external dependencies — system fonts only, works offline.
+  ============================================================================
+-->
+<style>
+  /* ================= Base ================= */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: #eef0f7; color: #17203a; -webkit-tap-highlight-color: transparent;
+  }
+  .hidden { display: none !important; }
+  button { font: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+  input, select { font: inherit; }
+  .urdu { font-family: "Noto Nastaliq Urdu", "Segoe UI", system-ui, sans-serif; }
+
+  /* ================= App shell ================= */
+  #appView { max-width: 560px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; }
+  #appBar {
+    background: linear-gradient(135deg, #5b21b6, #4338ca);
+    color: #fff; padding: 14px 18px 12px; position: sticky; top: 0; z-index: 20;
+    box-shadow: 0 2px 10px rgba(40,20,110,.35);
+  }
+  #appBar .clinic { font-size: 19px; font-weight: 700; }
+  #appBar .mode { font-size: 12px; opacity: .85; margin-top: 2px; }
+  main { flex: 1; padding: 16px 14px 92px; }
+  .view { display: block; }
+  .card { background: #fff; border-radius: 16px; padding: 16px; box-shadow: 0 2px 10px rgba(23,32,58,.07); margin-bottom: 14px; }
+  .muted { color: #68708a; font-size: 13px; }
+  label.field { display: block; font-size: 13px; font-weight: 600; color: #3c4560; margin: 12px 0 6px; }
+  label.field:first-child { margin-top: 0; }
+  .txt, select.txt {
+    width: 100%; padding: 12px 13px; border: 1.5px solid #d5d9e8; border-radius: 12px;
+    background: #fbfbfe; color: #17203a; outline: none;
+  }
+  .txt:focus { border-color: #6d28d9; background: #fff; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 13px 16px; border-radius: 13px; font-weight: 700; font-size: 15px;
+    transition: transform .05s ease, filter .15s ease; user-select: none;
+  }
+  .btn:active { transform: scale(.98); }
+  .btn.block { display: flex; width: 100%; }
+  .btn.primary { background: linear-gradient(135deg, #6d28d9, #4338ca); color: #fff; }
+  .btn.dark { background: #101a33; color: #fff; font-size: 18px; padding: 18px; border-radius: 15px; }
+  .btn.line { background: #fff; border: 1.5px solid #d5d9e8; color: #2a3352; }
+  .btn.danger { background: #fff1f2; border: 1.5px solid #fecdd3; color: #be123c; }
+  .btn.armed { background: #be123c !important; color: #fff !important; border-color: #be123c !important; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+  /* ================= Call view ================= */
+  .deskRow { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+  .deskRow .room { font-size: 19px; font-weight: 800; }
+  .deskRow .role { font-size: 12.5px; color: #68708a; }
+  .nowCard {
+    background: linear-gradient(150deg, #6d28d9, #3730a3); color: #fff; border-radius: 18px;
+    padding: 20px 18px 18px; text-align: center; box-shadow: 0 8px 22px rgba(76,29,149,.35);
+  }
+  .nowCard .lbl { font-size: 13px; letter-spacing: .12em; text-transform: uppercase; opacity: .85; }
+  .nowCard .num { font-size: 88px; font-weight: 800; line-height: 1.05; }
+  .nowCard .sub { font-size: 14px; opacity: .9; }
+  .trio { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 9px; margin: 12px 0; }
+  .trio .btn { padding: 12px 6px; font-size: 14px; }
+  .btn.doneB { background: #ecfdf5; border: 1.5px solid #a7f3d0; color: #047857; }
+  .callRow { display: flex; gap: 9px; }
+  .callRow .txt { flex: 1; }
+  .checkRow { display: flex; gap: 10px; align-items: flex-start; padding: 10px 2px; font-size: 14px; color: #2a3352; }
+  .checkRow input { width: 19px; height: 19px; margin-top: 1px; accent-color: #6d28d9; flex: none; }
+  .secTitle { font-size: 15px; font-weight: 800; margin: 16px 2px 9px; display: flex; justify-content: space-between; align-items: baseline; }
+  .waitItem, .qItem {
+    display: flex; align-items: center; gap: 12px; background: #fff; border-radius: 13px;
+    padding: 11px 13px; margin-bottom: 8px; box-shadow: 0 1px 5px rgba(23,32,58,.06);
+  }
+  .waitItem .n, .qItem .n { font-size: 21px; font-weight: 800; min-width: 42px; color: #4338ca; }
+  .waitItem .meta, .qItem .meta { flex: 1; min-width: 0; }
+  .waitItem .nm, .qItem .nm { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .waitItem .tm, .qItem .tm { font-size: 12px; color: #68708a; }
+  .iconBtn { font-size: 19px; padding: 7px 10px; border-radius: 10px; background: #eef2ff; }
+  .emptyNote { text-align: center; color: #8a91ab; padding: 20px 8px; font-size: 14px; }
+
+  /* ================= Tokens view ================= */
+  .bigIssue { text-align: center; padding: 8px 0 2px; }
+  .bigIssue .nextLbl { font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: #68708a; }
+  .bigIssue .nextNum { font-size: 64px; font-weight: 800; color: #4338ca; line-height: 1.1; }
+  .issuedCard { background: #eef2ff; border: 1.5px dashed #a5b4fc; border-radius: 14px; padding: 14px; text-align: center; margin-top: 14px; }
+  .issuedCard .t { font-size: 15px; }
+  .issuedCard .t b { font-size: 22px; color: #3730a3; }
+  .statsRow { display: flex; gap: 8px; text-align: center; }
+  .statsRow .stat { flex: 1; background: #fff; border-radius: 13px; padding: 11px 4px; box-shadow: 0 1px 5px rgba(23,32,58,.06); }
+  .statsRow .stat b { display: block; font-size: 21px; color: #17203a; }
+  .statsRow .stat span { font-size: 11.5px; color: #68708a; }
+
+  /* ================= Queue view / chips ================= */
+  .chip { font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+  .chip.waiting { background: #fef3c7; color: #92400e; }
+  .chip.called  { background: #dbeafe; color: #1d4ed8; }
+  .chip.done    { background: #d1fae5; color: #065f46; }
+  .chip.noshow  { background: #ffe4e6; color: #9f1239; }
+  .qItem.tappable { cursor: pointer; }
+  .qItem.tappable:active { background: #eef2ff; }
+  .tapHint { font-size: 11px; color: #6d28d9; font-weight: 700; }
+
+  /* ================= Tab bar ================= */
+  #tabBar {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 0; width: 100%; max-width: 560px;
+    background: #fff; border-top: 1px solid #e3e6f0; display: grid; grid-template-columns: repeat(4, 1fr);
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); z-index: 30; box-shadow: 0 -3px 14px rgba(23,32,58,.06);
+  }
+  #tabBar button { padding: 7px 2px; font-size: 12.5px; font-weight: 600; color: #68708a; border-radius: 10px; }
+  #tabBar button .ic { display: block; font-size: 20px; margin-bottom: 1px; }
+  #tabBar button.active { color: #5b21b6; }
+  #tabBar button.active .ic { transform: scale(1.08); }
+
+  /* ================= Toast ================= */
+  #toast {
+    position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%) translateY(20px);
+    background: #101a33; color: #fff; padding: 11px 18px; border-radius: 999px; font-size: 14px; font-weight: 600;
+    opacity: 0; pointer-events: none; transition: all .25s ease; z-index: 99; max-width: 88vw; text-align: center;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ================= TV view ================= */
+  #tvView {
+    min-height: 100vh; height: 100vh; display: flex; flex-direction: column; color: #fff; overflow: hidden;
+    background: radial-gradient(1100px 600px at 20% -10%, #1d4ed8 0%, transparent 55%),
+                linear-gradient(160deg, #0a1f5c 0%, #0b2a7a 55%, #081743 100%);
+    padding: 3.2vh 3.5vw; position: relative;
+  }
+  #tvTop { display: flex; justify-content: space-between; align-items: flex-start; }
+  #tvClinic { font-size: clamp(22px, 3.4vw, 44px); font-weight: 800; letter-spacing: .01em; }
+  #tvClock { text-align: right; }
+  #tvClock .t { font-size: clamp(20px, 3vw, 40px); font-weight: 800; font-variant-numeric: tabular-nums; }
+  #tvClock .d { font-size: clamp(12px, 1.4vw, 19px); opacity: .8; }
+  #tvMain { flex: 1; display: grid; grid-template-columns: 1.5fr 1fr; gap: 2.5vw; margin-top: 3vh; min-height: 0; }
+  #tvServing {
+    background: rgba(255,255,255,.07); border: 2px solid rgba(255,255,255,.16); border-radius: 26px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 2vh 2vw;
+  }
+  #tvServing .lbl { font-size: clamp(18px, 2.6vw, 38px); font-weight: 800; letter-spacing: .14em; color: #facc15; }
+  #tvServing .lbl .urdu { letter-spacing: 0; margin-inline-start: 14px; color: #fff; }
+  #tvNum { font-size: clamp(120px, 24vw, 330px); font-weight: 800; line-height: 1; margin: 1vh 0; text-shadow: 0 10px 40px rgba(0,0,0,.45); }
+  #tvRoom { font-size: clamp(20px, 3vw, 42px); font-weight: 700; }
+  #tvRoom .arw { color: #facc15; margin-inline-end: 8px; }
+  #tvPatient { font-size: clamp(18px, 2.5vw, 36px); font-weight: 600; color: #fde68a; margin-top: 1.2vh; }
+  #tvServing.flash { animation: tvFlash 2.4s ease; }
+  #tvServing.flash #tvNum { animation: tvPop 2.4s ease; }
+  @keyframes tvFlash {
+    0%, 100% { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.16); }
+    12%, 45% { background: rgba(250,204,21,.28); border-color: #facc15; }
+  }
+  @keyframes tvPop { 0% { transform: scale(1); } 12% { transform: scale(1.07); } 45% { transform: scale(1.03); } 100% { transform: scale(1); } }
+  #tvLast {
+    background: rgba(0,0,0,.22); border: 2px solid rgba(255,255,255,.12); border-radius: 26px; padding: 2.4vh 1.6vw;
+    display: flex; flex-direction: column;
+  }
+  #tvLast .lbl { font-size: clamp(15px, 2vw, 28px); font-weight: 800; letter-spacing: .12em; color: #bfdbfe; margin-bottom: 1.6vh; }
+  #tvLast .lbl .urdu { letter-spacing: 0; color: #fff; margin-inline-start: 10px; }
+  .tvLastItem { display: flex; align-items: center; gap: 14px; padding: 1.15vh 4px; border-bottom: 1px solid rgba(255,255,255,.12); }
+  .tvLastItem:last-child { border-bottom: none; }
+  .tvLastItem .n { font-size: clamp(24px, 3.4vw, 48px); font-weight: 800; min-width: 2.2ch; color: #93c5fd; }
+  .tvLastItem .r { font-size: clamp(14px, 1.7vw, 25px); opacity: .92; }
+  #tvFoot { display: flex; justify-content: space-between; align-items: center; margin-top: 2.4vh; font-size: clamp(14px, 1.7vw, 24px); }
+  #tvWaiting b { color: #facc15; font-size: 1.25em; }
+  #tvStatus { font-size: clamp(12px, 1.4vw, 20px); opacity: .9; text-align: center; }
+  #tvStatus .live { color: #4ade80; font-weight: 800; }
+  #tvHint { text-align: center; margin-top: 1vh; font-size: clamp(12px, 1.4vw, 19px); color: #fde68a; opacity: .85; }
+  #tvSoundOverlay {
+    position: absolute; inset: 0; z-index: 50; display: flex; flex-direction: column; gap: 10px;
+    align-items: center; justify-content: center; background: rgba(4,10,35,.82); cursor: pointer; text-align: center; padding: 20px;
+  }
+  #tvSoundOverlay .big { font-size: clamp(26px, 4vw, 52px); font-weight: 800; }
+  #tvSoundOverlay .small { font-size: clamp(14px, 1.8vw, 24px); opacity: .85; }
+
+  /* ================= Print slip (58mm thermal style) ================= */
+  #printSlip { display: none; }
+  @media print {
+    @page { margin: 4mm; }
+    body { background: #fff !important; }
+    #appView, #tvView, #toast { display: none !important; }
+    #printSlip {
+      display: block !important; width: 58mm; margin: 0 auto; color: #000; text-align: center;
+      font-family: "Courier New", ui-monospace, monospace;
+    }
+    #printSlip .cName { font-family: system-ui, sans-serif; font-size: 15pt; font-weight: 800; }
+    #printSlip .rule { border-top: 2px dashed #000; margin: 3mm 0; }
+    #printSlip .tokLbl { font-size: 10pt; letter-spacing: .3em; }
+    #printSlip .tokNum { font-size: 54pt; font-weight: 800; line-height: 1.05; font-family: system-ui, sans-serif; }
+    #printSlip .line { font-size: 10.5pt; margin: 1mm 0; font-family: system-ui, sans-serif; }
+    #printSlip .foot { font-size: 9pt; margin-top: 2mm; font-family: system-ui, sans-serif; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ==================== APP VIEW (phone / reception) ==================== -->
+<div id="appView">
+  <header id="appBar">
+    <div class="clinic" id="barClinic">Dr Qaiser Iqbal</div>
+    <div class="mode" id="barMode">Demo mode — this device only</div>
+  </header>
+
+  <main>
+    <!-- ========== CALL VIEW ========== -->
+    <section id="view-call" class="view">
+      <div class="deskRow">
+        <div>
+          <div class="room" id="callRoomName">Doctor's Room</div>
+          <div class="role">Doctor — calling desk</div>
+        </div>
+      </div>
+
+      <div class="nowCard">
+        <div class="lbl">At your desk now</div>
+        <div class="num" id="callCurrent">—</div>
+        <div class="sub" id="callCurrentSub">No patient called yet</div>
+      </div>
+
+      <div class="trio">
+        <button class="btn line" id="btnCallAgain">🔊 Call again</button>
+        <button class="btn doneB" id="btnDone">✓ Done</button>
+        <button class="btn danger" id="btnNoShow">✕ No-show</button>
+      </div>
+
+      <button class="btn dark block" id="btnCallNext">Call next</button>
+
+      <div class="card" style="margin-top:14px;">
+        <label class="field" for="specificNum">Call a specific number</label>
+        <div class="callRow">
+          <input class="txt" id="specificNum" type="number" inputmode="numeric" min="1" placeholder="e.g. 7">
+          <button class="btn primary" id="btnCallSpecific">🔊 Call</button>
+        </div>
+        <label class="checkRow">
+          <input type="checkbox" id="chkSayHere" checked>
+          <span>Say the call on this device too <span class="muted">(when there is no TV)</span></span>
+        </label>
+        <button class="btn line block" id="btnOpenTv1">📺 Open the TV display</button>
+      </div>
+
+      <div class="secTitle"><span>Waiting</span><span class="muted" id="waitCount"></span></div>
+      <div id="waitList"></div>
+    </section>
+
+    <!-- ========== TOKENS VIEW ========== -->
+    <section id="view-tokens" class="view hidden">
+      <div class="card">
+        <div class="bigIssue">
+          <div class="nextLbl">Next token number</div>
+          <div class="nextNum" id="nextNumBig">1</div>
+        </div>
+        <label class="field" for="patName">Patient name (optional)</label>
+        <input class="txt" id="patName" type="text" placeholder="e.g. Ahmed Khan" autocomplete="off">
+        <button class="btn primary block" id="btnNewToken" style="margin-top:14px; font-size:17px; padding:16px;">🎟️ New Token</button>
+        <div class="issuedCard hidden" id="issuedCard">
+          <div class="t">Issued: Token <b id="issuedNum"></b> <span class="muted" id="issuedName"></span></div>
+          <button class="btn line" id="btnPrintSlip" style="margin-top:10px;">🖨️ Print slip</button>
+        </div>
+      </div>
+      <div class="statsRow">
+        <div class="stat"><b id="stIssued">0</b><span>Issued today</span></div>
+        <div class="stat"><b id="stWaiting">0</b><span>Waiting</span></div>
+        <div class="stat"><b id="stDone">0</b><span>Done</span></div>
+        <div class="stat"><b id="stNoShow">0</b><span>No-show</span></div>
+      </div>
+      <p class="muted" style="margin-top:12px; text-align:center;">Tip: printed slip uses the browser print dialog — pick the thermal printer there. Direct Bluetooth printing comes in the next phase.</p>
+    </section>
+
+    <!-- ========== QUEUE VIEW ========== -->
+    <section id="view-queue" class="view hidden">
+      <div class="secTitle"><span>Today's queue</span><span class="muted" id="queueDate"></span></div>
+      <div id="queueList"></div>
+      <p class="muted" style="text-align:center;">Tap a <b>waiting</b> or <b>no-show</b> token to call it directly.</p>
+    </section>
+
+    <!-- ========== MORE / SETTINGS VIEW ========== -->
+    <section id="view-more" class="view hidden">
+      <div class="card">
+        <div class="secTitle" style="margin-top:0;">Clinic settings</div>
+        <label class="field" for="setClinic">Clinic name</label>
+        <input class="txt" id="setClinic" type="text" autocomplete="off">
+        <label class="field" for="setRoom">Doctor / Room name</label>
+        <input class="txt" id="setRoom" type="text" autocomplete="off">
+        <label class="field" for="setLang">Announcement language</label>
+        <select class="txt" id="setLang">
+          <option value="both">Urdu + English (Both)</option>
+          <option value="ur">Urdu only</option>
+          <option value="en">English only</option>
+        </select>
+        <label class="checkRow">
+          <input type="checkbox" id="setTvVoice">
+          <span>Voice announcement on the TV display too</span>
+        </label>
+        <button class="btn primary block" id="btnOpenTv2">📺 Open TV display</button>
+      </div>
+
+      <div class="card">
+        <div class="secTitle" style="margin-top:0;">Cloud sync (Supabase)</div>
+        <p class="muted">Optional. Paste the clinic's Supabase project details to enable live sync later. Demo works fully without it.</p>
+        <label class="field" for="setSbUrl">Project URL</label>
+        <input class="txt" id="setSbUrl" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off">
+        <label class="field" for="setSbKey">Anon key</label>
+        <input class="txt" id="setSbKey" type="text" placeholder="eyJhbGciOi…" autocomplete="off">
+        <button class="btn line block" id="btnSaveCloud" style="margin-top:12px;">Save cloud settings</button>
+        <p class="muted" id="cloudStatus" style="margin-top:10px;"></p>
+      </div>
+
+      <div class="card">
+        <div class="secTitle" style="margin-top:0;">Day control</div>
+        <p class="muted" style="margin-bottom:12px;">Clears today's tokens and starts again from Token 1. Clinic settings are kept.</p>
+        <button class="btn danger block" id="btnReset">🌅 Start new day / Reset</button>
+      </div>
+
+      <p class="muted" style="text-align:center;">Clinic Token Queue · MVP v0.1 (demo)</p>
+    </section>
+  </main>
+
+  <nav id="tabBar">
+    <button data-view="tokens"><span class="ic">🎟️</span>Tokens</button>
+    <button data-view="call" class="active"><span class="ic">🔊</span>Call</button>
+    <button data-view="queue"><span class="ic">📋</span>Queue</button>
+    <button data-view="more"><span class="ic">⚙️</span>More</button>
+  </nav>
+</div>
+
+<!-- ==================== TV VIEW (waiting area) ==================== -->
+<div id="tvView" class="hidden">
+  <div id="tvSoundOverlay">
+    <div class="big">🔊 Tap to enable sound</div>
+    <div class="small">Awaz ke liye ek dafa screen par tap karein — then announcements will play automatically.</div>
+  </div>
+  <div id="tvTop">
+    <div id="tvClinic">Dr Qaiser Iqbal</div>
+    <div id="tvClock"><div class="t" id="tvTime">--:--</div><div class="d" id="tvDate"></div></div>
+  </div>
+  <div id="tvMain">
+    <div id="tvServing">
+      <div class="lbl">NOW SERVING <span class="urdu" dir="rtl">اب باری</span></div>
+      <div id="tvNum">–</div>
+      <div id="tvRoom"><span class="arw">➜</span><span id="tvRoomName">Doctor's Room</span></div>
+      <div id="tvPatient" class="hidden"></div>
+    </div>
+    <aside id="tvLast">
+      <div class="lbl">LAST CALLED <span class="urdu" dir="rtl">پچھلے نمبر</span></div>
+      <div id="tvLastList"></div>
+    </aside>
+  </div>
+  <div id="tvFoot">
+    <div>Please listen for your number · <span class="urdu" dir="rtl">براہ کرم اپنے نمبر کا انتظار کریں</span></div>
+    <div id="tvStatus">Waiting for calls…</div>
+    <div id="tvWaiting"><b>0</b> waiting</div>
+  </div>
+  <div id="tvHint" class="hidden">Agar number update na ho, to dono screens ek hi link se kholein — online link sab se behtar chalta hai.</div>
+</div>
+
+<!-- ==================== PRINT SLIP (only visible when printing) ==================== -->
+<div id="printSlip" aria-hidden="true">
+  <div class="cName" id="slipClinic">Dr Qaiser Iqbal</div>
+  <div class="rule"></div>
+  <div class="tokLbl">TOKEN</div>
+  <div class="tokNum" id="slipNum">1</div>
+  <div class="line" id="slipName"></div>
+  <div class="line" id="slipRoom">Doctor's Room</div>
+  <div class="line" id="slipWhen"></div>
+  <div class="rule"></div>
+  <div class="foot">Please wait until your number is called.<br><span dir="rtl">براہ کرم اپنے نمبر آنے کا انتظار کریں</span></div>
+</div>
+
+<div id="toast" role="status"></div>
+
+<script>
+'use strict';
+/* =====================================================================
+   SECTION 1 — Constants, defaults, small helpers
+   ===================================================================== */
+var LS_KEY = 'tokenq_state_v1';
+var CHANNEL_NAME = 'tokenq';
+
+function pad2(n) { return (n < 10 ? '0' : '') + n; }
+function todayStr(d) {
+  d = d || new Date();
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+}
+function fmtTime(ts) {
+  if (!ts) return '';
+  var d = new Date(ts), h = d.getHours(), ap = h >= 12 ? 'PM' : 'AM';
+  h = h % 12; if (h === 0) h = 12;
+  return h + ':' + pad2(d.getMinutes()) + ' ' + ap;
+}
+function fmtDateTime(ts) {
+  var d = new Date(ts);
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear() + ' · ' + fmtTime(ts);
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function $(id) { return document.getElementById(id); }
+
+var DEFAULTS = {
+  clinicName: 'Dr Qaiser Iqbal',
+  roomName: "Doctor's Room",
+  lang: 'both',            // 'ur' | 'en' | 'both'
+  tvVoice: false,          // voice announcement on TV (toggle in Settings)
+  nextNumber: 1,
+  current: null,           // token number currently at the desk
+  tokens: [],              // { n, name, status: waiting|called|done|noshow, issuedAt, calledAt }
+  lastCalled: [],          // { n, room, at } most-recent first
+  callSeq: 0,              // increments on EVERY call action (TV flash/ding trigger)
+  day: todayStr(),
+  cloud: { url: '', key: '' },  // Supabase config (stored only in v0.1)
+  _rev: 0                  // internal revision for cross-tab sync
+};
+
+/* =====================================================================
+   SECTION 2 — State: load / save / cross-tab sync (demo mode)
+   Demo sync = BroadcastChannel('tokenq') + 'storage' event fallback.
+   Works between tabs/windows of the SAME browser on the SAME device.
+   ===================================================================== */
+function normalizeState(s) {
+  var out = {}, k;
+  for (k in DEFAULTS) out[k] = DEFAULTS[k];
+  if (s && typeof s === 'object') for (k in s) out[k] = s[k];
+  out.cloud = { url: '', key: '' };
+  if (s && s.cloud) { out.cloud.url = s.cloud.url || ''; out.cloud.key = s.cloud.key || ''; }
+  if (!Array.isArray(out.tokens)) out.tokens = [];
+  if (!Array.isArray(out.lastCalled)) out.lastCalled = [];
+  return out;
+}
+var storedStateExisted = false; // true when a previously-saved state was found at boot
+function loadState() {
+  var s = null;
+  try {
+    var raw = localStorage.getItem(LS_KEY);
+    if (raw) { storedStateExisted = true; s = normalizeState(JSON.parse(raw)); }
+  } catch (e) { /* corrupted storage -> start fresh */ }
+  if (!s) s = normalizeState(null);
+  // Automatic day rollover: a new calendar day starts a fresh queue,
+  // clinic settings are kept.
+  if (s.day !== todayStr()) {
+    s.tokens = []; s.lastCalled = []; s.current = null; s.nextNumber = 1; s.day = todayStr();
+  }
+  return s;
+}
+var state = loadState();
+
+var bc = null;
+try {
+  bc = new BroadcastChannel(CHANNEL_NAME);
+  bc.onmessage = function (ev) {
+    if (ev.data && ev.data.type === 'state') applyRemote(ev.data.state);
+  };
+} catch (e) { bc = null; /* very old browser: storage fallback still works */ }
+
+// Fallback for browsers without BroadcastChannel: 'storage' fires in OTHER tabs.
+window.addEventListener('storage', function (e) {
+  if (e.key === LS_KEY && e.newValue) {
+    try { applyRemote(JSON.parse(e.newValue)); } catch (err) { /* ignore */ }
+  }
+});
+
+function persistOnly() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) { /* storage full/blocked */ }
+}
+function save() {
+  state._rev = (state._rev || 0) + 1;
+  persistOnly();
+  if (bc) { try { bc.postMessage({ type: 'state', state: state }); } catch (e) { /* ignore */ } }
+  cloudSync(state); // hook: no-op in v0.1 (see Section 3)
+}
+function applyRemote(remote) {
+  if (!remote || typeof remote !== 'object') return;
+  if ((remote._rev || 0) <= (state._rev || 0)) return; // stale or our own echo
+  state = normalizeState(remote);
+  persistOnly(); // keep local copy fresh WITHOUT re-broadcasting (avoids loops)
+  if (IS_TV) { tvGotState = true; tvLastUpdateAt = Date.now(); } // TV status pill (Section 8)
+  renderAll();
+}
+
+/* =====================================================================
+   SECTION 3 — Cloud sync hook (Supabase) — NOT implemented in v0.1
+   TODO(next step): when state.cloud.url + state.cloud.key are set, push
+   state changes to a Supabase table and subscribe to Realtime updates so
+   the phone and the TV on DIFFERENT devices stay in sync. Until then the
+   demo sync (Section 2) handles same-device tabs.
+   ===================================================================== */
+function cloudSync(/* s */) {
+  return false;
+}
+function cloudConfigured() {
+  return !!(state.cloud && state.cloud.url && state.cloud.key);
+}
+
+/* =====================================================================
+   SECTION 4 — Voice announcement (speechSynthesis) + TV ding (WebAudio)
+   ===================================================================== */
+function announce(n) {
+  if (n == null) return;
+  if (!('speechSynthesis' in window)) return;
+  try {
+    window.speechSynthesis.cancel();
+    var room = state.roomName;
+    // Include the patient name when this token has one (both languages);
+    // without a name the wording stays exactly as before.
+    var tok = findToken(n);
+    var pname = tok && tok.name ? tok.name : '';
+    var urText = pname
+      ? 'ٹوکن نمبر ' + n + '، ' + pname + '۔ براہ کرم ' + room + ' میں تشریف لے جائیں۔'
+      : 'ٹوکن نمبر ' + n + '۔ براہ کرم ' + room + ' میں تشریف لے جائیں۔';
+    var enText = pname
+      ? 'Token number ' + n + ', ' + pname + '. Please proceed to the ' + room + '.'
+      : 'Token number ' + n + '. Please proceed to the ' + room + '.';
+    var mk = function (text, lang) {
+      var u = new SpeechSynthesisUtterance(text);
+      u.lang = lang; u.rate = 0.95;
+      if (lang.indexOf('ur') === 0) {
+        try {
+          var vs = window.speechSynthesis.getVoices(), i;
+          for (i = 0; i < vs.length; i++) {
+            if (vs[i].lang && vs[i].lang.toLowerCase().indexOf('ur') === 0) { u.voice = vs[i]; break; }
+          }
+        } catch (e) { /* no Urdu voice: utterance still queued, fails silently */ }
+      }
+      return u;
+    };
+    if (state.lang === 'ur') {
+      window.speechSynthesis.speak(mk(urText, 'ur-PK'));
+    } else if (state.lang === 'en') {
+      window.speechSynthesis.speak(mk(enText, 'en-US'));
+    } else { // both: Urdu first, then English
+      window.speechSynthesis.speak(mk(urText, 'ur-PK'));
+      window.speechSynthesis.speak(mk(enText, 'en-US'));
+    }
+  } catch (e) { /* TTS unavailable — never crash the app for audio */ }
+}
+
+var audioCtx = null, audioUnlocked = false;
+function ensureAudio() {
+  try {
+    if (!audioCtx) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (e) { /* ignore */ }
+}
+function ding() {
+  if (!audioUnlocked || !audioCtx) return;
+  try {
+    var t = audioCtx.currentTime;
+    [[880, 0], [1318.5, 0.16]].forEach(function (pair) {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.value = pair[0];
+      g.gain.setValueAtTime(0.0001, t + pair[1]);
+      g.gain.exponentialRampToValueAtTime(0.22, t + pair[1] + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + pair[1] + 0.38);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t + pair[1]); o.stop(t + pair[1] + 0.42);
+    });
+  } catch (e) { /* ignore */ }
+}
+
+/* =====================================================================
+   SECTION 5 — Queue actions (used by Call / Tokens / Queue views)
+   ===================================================================== */
+function findToken(n) {
+  for (var i = 0; i < state.tokens.length; i++) if (state.tokens[i].n === n) return state.tokens[i];
+  return null;
+}
+function waitingTokens() { return state.tokens.filter(function (t) { return t.status === 'waiting'; }); }
+
+// Shared bookkeeping for every "call" (next / specific / again / tap-in-queue)
+function registerCall(token) {
+  token.status = 'called';
+  token.calledAt = Date.now();
+  state.current = token.n;
+  state.lastCalled = state.lastCalled.filter(function (x) { return x.n !== token.n; });
+  state.lastCalled.unshift({ n: token.n, room: state.roomName, at: Date.now() });
+  state.callSeq = (state.callSeq || 0) + 1;
+  save();
+}
+function maybeAnnounceHere(n) {
+  var chk = $('chkSayHere');
+  if (chk && chk.checked) announce(n);
+}
+function callNext() {
+  var w = waitingTokens();
+  if (!w.length) { toast('No one is waiting'); return; }
+  registerCall(w[0]);
+  maybeAnnounceHere(w[0].n);
+  renderAll();
+}
+function callSpecific(n) {
+  var t = findToken(n);
+  if (!t) { toast('Token ' + n + ' not found'); return; }
+  if (t.status === 'done') { toast('Token ' + n + ' is already done'); return; }
+  if (t.status === 'called' && state.current !== t.n) { /* still callable below */ }
+  registerCall(t);
+  maybeAnnounceHere(t.n);
+  renderAll();
+}
+function callAgain() {
+  if (state.current == null) { toast('No patient at the desk yet'); return; }
+  var t = findToken(state.current);
+  if (!t) return;
+  registerCall(t); // same token: refreshes lastCalled + bumps callSeq so TV flashes again
+  maybeAnnounceHere(t.n);
+  renderAll();
+}
+function finishCurrent(status) {
+  if (state.current == null) { toast('No patient at the desk yet'); return; }
+  var t = findToken(state.current);
+  if (t) t.status = status;
+  state.current = null;
+  save();
+  renderAll();
+}
+var lastIssued = null;
+function issueToken() {
+  var nameEl = $('patName');
+  var t = {
+    n: state.nextNumber, name: (nameEl.value || '').trim(),
+    status: 'waiting', issuedAt: Date.now(), calledAt: null
+  };
+  state.nextNumber++;
+  state.tokens.push(t);
+  lastIssued = t;
+  nameEl.value = '';
+  save();
+  renderAll();
+  toast('Token ' + t.n + ' issued');
+}
+
+/* =====================================================================
+   SECTION 6 — Toast
+   ===================================================================== */
+var toastTimer = null;
+function toast(msg) {
+  var el = $('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2200);
+}
+
+/* =====================================================================
+   SECTION 7 — Rendering: app views
+   ===================================================================== */
+var IS_TV = new URLSearchParams(window.location.search).get('view') === 'tv'
+  || (window.location.hash || '') === '#tv'; // #tv works on file:// and hosted links alike
+var activeView = 'call';
+
+function statusChip(st) {
+  var label = { waiting: 'Waiting', called: 'Called', done: 'Done', noshow: 'No-show' }[st] || st;
+  return '<span class="chip ' + st + '">' + label + '</span>';
+}
+function renderBar() {
+  $('barClinic').textContent = state.clinicName;
+  $('barMode').textContent = cloudConfigured()
+    ? 'Live mode (Supabase) — sync coming in next step'
+    : 'Demo mode — syncs between tabs on this device';
+}
+function renderCall() {
+  $('callRoomName').textContent = state.roomName;
+  var cur = state.current, t = cur != null ? findToken(cur) : null;
+  $('callCurrent').textContent = cur != null ? cur : '—';
+  $('callCurrentSub').textContent = t
+    ? (state.roomName + (t.name ? ' · ' + t.name : '') + (t.calledAt ? ' · called ' + fmtTime(t.calledAt) : ''))
+    : 'No patient called yet';
+  var w = waitingTokens();
+  $('btnCallNext').textContent = w.length ? ('Call next · ' + w[0].n) : 'Call next';
+  $('btnCallNext').disabled = !w.length;
+  $('btnCallAgain').disabled = cur == null;
+  $('btnDone').disabled = cur == null;
+  $('btnNoShow').disabled = cur == null;
+  $('waitCount').textContent = w.length + ' in queue';
+  var list = $('waitList');
+  if (!w.length) {
+    list.innerHTML = '<div class="emptyNote">No one is waiting.<br>Issue tokens from the Tokens tab.</div>';
+  } else {
+    list.innerHTML = w.slice(0, 8).map(function (tk) {
+      return '<div class="waitItem"><div class="n">' + tk.n + '</div>' +
+        '<div class="meta"><div class="nm">' + (tk.name ? esc(tk.name) : 'Token ' + tk.n) + '</div>' +
+        '<div class="tm">' + fmtTime(tk.issuedAt) + '</div></div>' +
+        '<button class="iconBtn" data-call="' + tk.n + '" title="Call this token">🔊</button></div>';
+    }).join('');
+    Array.prototype.forEach.call(list.querySelectorAll('[data-call]'), function (b) {
+      b.addEventListener('click', function () { callSpecific(parseInt(b.getAttribute('data-call'), 10)); });
+    });
+  }
+}
+function renderTokens() {
+  $('nextNumBig').textContent = state.nextNumber;
+  var issued = state.tokens.length;
+  $('stIssued').textContent = issued;
+  $('stWaiting').textContent = waitingTokens().length;
+  $('stDone').textContent = state.tokens.filter(function (t) { return t.status === 'done'; }).length;
+  $('stNoShow').textContent = state.tokens.filter(function (t) { return t.status === 'noshow'; }).length;
+  var card = $('issuedCard');
+  if (lastIssued && findToken(lastIssued.n)) {
+    card.classList.remove('hidden');
+    $('issuedNum').textContent = '#' + lastIssued.n;
+    $('issuedName').textContent = lastIssued.name ? '· ' + lastIssued.name : '';
+  } else {
+    card.classList.add('hidden');
+  }
+}
+function renderQueue() {
+  $('queueDate').textContent = fmtDateTime(Date.now()).split(' · ')[0];
+  var list = $('queueList');
+  if (!state.tokens.length) {
+    list.innerHTML = '<div class="emptyNote">No tokens issued today yet.</div>';
+    return;
+  }
+  list.innerHTML = state.tokens.map(function (tk) {
+    var tappable = (tk.status === 'waiting' || tk.status === 'noshow');
+    return '<div class="qItem' + (tappable ? ' tappable' : '') + '"' + (tappable ? ' data-call="' + tk.n + '"' : '') + '>' +
+      '<div class="n">' + tk.n + '</div>' +
+      '<div class="meta"><div class="nm">' + (tk.name ? esc(tk.name) : 'Token ' + tk.n) + '</div>' +
+      '<div class="tm">Issued ' + fmtTime(tk.issuedAt) + (tk.calledAt ? ' · Called ' + fmtTime(tk.calledAt) : '') +
+      (tappable ? ' · <span class="tapHint">tap to call</span>' : '') + '</div></div>' +
+      statusChip(tk.status) + '</div>';
+  }).join('');
+  Array.prototype.forEach.call(list.querySelectorAll('[data-call]'), function (row) {
+    row.addEventListener('click', function () { callSpecific(parseInt(row.getAttribute('data-call'), 10)); });
+  });
+}
+function renderSettings() {
+  var map = [
+    ['setClinic', state.clinicName], ['setRoom', state.roomName],
+    ['setSbUrl', state.cloud.url], ['setSbKey', state.cloud.key]
+  ];
+  map.forEach(function (pair) {
+    var el = $(pair[0]);
+    if (el && document.activeElement !== el) el.value = pair[1] || '';
+  });
+  var lang = $('setLang'); if (lang && document.activeElement !== lang) lang.value = state.lang;
+  var tvv = $('setTvVoice'); if (tvv) tvv.checked = !!state.tvVoice;
+  $('cloudStatus').textContent = cloudConfigured()
+    ? 'Live mode (Supabase) — sync coming in next step. Config is saved; demo sync is still same-device for now.'
+    : 'Demo mode — no cloud config saved. The demo syncs between tabs on this device only.';
+}
+function renderAll() {
+  if (IS_TV) { renderTV(); return; }
+  renderBar(); renderCall(); renderTokens(); renderQueue(); renderSettings();
+}
+
+/* =====================================================================
+   SECTION 8 — Rendering: TV view
+   TV reacts to callSeq changes (not just number changes) so "Call again"
+   also flashes + dings + announces.
+   ===================================================================== */
+var tvPrevSeq = null;
+var tvGotState = false;    // TV status pill: has any state been applied yet?
+var tvLastUpdateAt = null; // when the last state was applied (ms epoch)
+function fmtClock(d) { return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds()); }
+function updateTvStatus() {
+  var el = $('tvStatus');
+  if (!el) return;
+  if (tvGotState) {
+    el.innerHTML = '<span class="live">● Live</span>' +
+      (tvLastUpdateAt ? ' · Last update ' + fmtClock(new Date(tvLastUpdateAt)) : '');
+    var hint = $('tvHint');
+    if (hint) hint.classList.add('hidden'); // sync works — hint no longer needed
+  } else {
+    el.textContent = 'Waiting for calls…';
+  }
+}
+function renderTV() {
+  $('tvClinic').textContent = state.clinicName;
+  $('tvRoomName').textContent = state.roomName;
+  var shown = state.current != null ? state.current
+    : (state.lastCalled.length ? state.lastCalled[0].n : null);
+  $('tvNum').textContent = shown != null ? shown : '–';
+  // Patient name (when the shown token has one) under the room name.
+  var shownTok = shown != null ? findToken(shown) : null;
+  var pEl = $('tvPatient');
+  if (shownTok && shownTok.name) {
+    pEl.textContent = shownTok.name;
+    pEl.classList.remove('hidden');
+  } else {
+    pEl.textContent = '';
+    pEl.classList.add('hidden');
+  }
+  var last = state.lastCalled.slice(0, 5);
+  $('tvLastList').innerHTML = last.length ? last.map(function (x) {
+    return '<div class="tvLastItem"><div class="n">' + x.n + '</div><div class="r">➜ ' + esc(x.room) + '</div></div>';
+  }).join('') : '<div class="tvLastItem"><div class="r" style="opacity:.6">—</div></div>';
+  $('tvWaiting').innerHTML = '<b>' + waitingTokens().length + '</b> waiting';
+
+  updateTvStatus(); // also on first paint — the pill must reflect a boot-loaded state
+  if (tvPrevSeq === null) { tvPrevSeq = state.callSeq; return; } // first paint: no flash
+  if (state.callSeq !== tvPrevSeq) {
+    tvPrevSeq = state.callSeq;
+    var card = $('tvServing');
+    card.classList.remove('flash');
+    void card.offsetWidth; // restart the CSS animation
+    card.classList.add('flash');
+    ding();
+    if (state.tvVoice && audioUnlocked && state.current != null) announce(state.current);
+  }
+  updateTvStatus();
+}
+function tickClock() {
+  var now = new Date();
+  var el = $('tvTime'); if (!el) return;
+  el.textContent = fmtTime(now) + ':' + pad2(now.getSeconds());
+  var days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  $('tvDate').textContent = days[now.getDay()] + ', ' + now.getDate() + ' ' + months[now.getMonth()] + ' ' + now.getFullYear();
+}
+
+/* =====================================================================
+   SECTION 9 — Print slip
+   ===================================================================== */
+function printSlip(token) {
+  if (!token) { toast('Issue a token first'); return; }
+  $('slipClinic').textContent = state.clinicName;
+  $('slipNum').textContent = token.n;
+  $('slipName').textContent = token.name ? ('Patient: ' + token.name) : '';
+  $('slipRoom').textContent = state.roomName;
+  $('slipWhen').textContent = fmtDateTime(token.issuedAt || Date.now());
+  window.print();
+}
+
+/* =====================================================================
+   SECTION 10 — Wiring: tabs, buttons, settings, TV overlay, boot
+   ===================================================================== */
+function switchView(name) {
+  activeView = name;
+  ['call', 'tokens', 'queue', 'more'].forEach(function (v) {
+    $('view-' + v).classList.toggle('hidden', v !== name);
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('#tabBar button'), function (b) {
+    b.classList.toggle('active', b.getAttribute('data-view') === name);
+  });
+  renderAll();
+}
+function openTV() {
+  var base = window.location.href.split(/[?#]/)[0];
+  // Carry BOTH signals (?view=tv and #tv) so the TV view is recognised
+  // from file:// and http(s) links alike.
+  window.open(base + '?view=tv#tv', '_blank');
+}
+var resetArmed = false, resetTimer = null;
+function disarmReset() {
+  resetArmed = false;
+  var b = $('btnReset');
+  b.classList.remove('armed');
+  b.textContent = '🌅 Start new day / Reset';
+}
+function doReset() {
+  state.tokens = []; state.lastCalled = []; state.current = null;
+  state.nextNumber = 1; state.day = todayStr(); state.callSeq = (state.callSeq || 0) + 1;
+  lastIssued = null;
+  save();
+  renderAll();
+  toast('New day started — queue cleared');
+}
+
+function wireApp() {
+  Array.prototype.forEach.call(document.querySelectorAll('#tabBar button'), function (b) {
+    b.addEventListener('click', function () { switchView(b.getAttribute('data-view')); });
+  });
+  $('btnCallNext').addEventListener('click', callNext);
+  $('btnCallAgain').addEventListener('click', callAgain);
+  $('btnDone').addEventListener('click', function () { finishCurrent('done'); });
+  $('btnNoShow').addEventListener('click', function () { finishCurrent('noshow'); });
+  $('btnCallSpecific').addEventListener('click', function () {
+    var v = parseInt($('specificNum').value, 10);
+    if (isNaN(v)) { toast('Type a token number first'); return; }
+    callSpecific(v);
+    $('specificNum').value = '';
+  });
+  $('btnOpenTv1').addEventListener('click', openTV);
+  $('btnOpenTv2').addEventListener('click', openTV);
+  $('btnNewToken').addEventListener('click', issueToken);
+  $('patName').addEventListener('keydown', function (e) { if (e.key === 'Enter') issueToken(); });
+  $('btnPrintSlip').addEventListener('click', function () { printSlip(lastIssued); });
+
+  // Settings: saved as you type/change.
+  $('setClinic').addEventListener('input', function () { state.clinicName = this.value; save(); renderBar(); });
+  $('setRoom').addEventListener('input', function () { state.roomName = this.value; save(); renderCall(); });
+  $('setLang').addEventListener('change', function () { state.lang = this.value; save(); });
+  $('setTvVoice').addEventListener('change', function () { state.tvVoice = this.checked; save(); });
+  $('btnSaveCloud').addEventListener('click', function () {
+    state.cloud.url = $('setSbUrl').value.trim();
+    state.cloud.key = $('setSbKey').value.trim();
+    save();
+    renderAll();
+    toast(cloudConfigured() ? 'Cloud settings saved' : 'Cloud settings cleared');
+  });
+
+  // Two-tap confirm for reset.
+  $('btnReset').addEventListener('click', function () {
+    if (!resetArmed) {
+      resetArmed = true;
+      this.classList.add('armed');
+      this.textContent = '⚠ Tap again to CONFIRM reset';
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(disarmReset, 3000);
+    } else {
+      clearTimeout(resetTimer);
+      disarmReset();
+      doReset();
+    }
+  });
+}
+function wireTV() {
+  var overlay = $('tvSoundOverlay');
+  overlay.addEventListener('click', function () {
+    ensureAudio();
+    audioUnlocked = true;
+    // Warm up speech synthesis inside the user gesture so later
+    // announcements are allowed to play.
+    try {
+      if ('speechSynthesis' in window) {
+        var u = new SpeechSynthesisUtterance(' ');
+        u.volume = 0;
+        window.speechSynthesis.speak(u);
+        window.speechSynthesis.getVoices();
+      }
+    } catch (e) { /* ignore */ }
+    overlay.classList.add('hidden');
+    toast('Sound enabled');
+  });
+  tickClock();
+  setInterval(tickClock, 1000);
+  // If no state ever arrives, show a one-line hint after ~6 seconds.
+  setTimeout(function () {
+    if (!tvGotState) { var h = $('tvHint'); if (h) h.classList.remove('hidden'); }
+  }, 6000);
+}
+
+// Boot: pick the mode from the URL, wire events, first render.
+if (IS_TV) {
+  $('appView').classList.add('hidden');
+  $('tvView').classList.remove('hidden');
+  // A state saved earlier (by the app view) counts as "received" for the pill.
+  if (storedStateExisted) { tvGotState = true; tvLastUpdateAt = Date.now(); }
+  wireTV();
+} else {
+  $('tvView').classList.add('hidden');
+  $('appView').classList.remove('hidden');
+  wireApp();
+  switchView('call');
+}
+renderAll();
+
+/* =====================================================================
+   Polling fallback (all views): re-read localStorage about once a second
+   and apply the state when it is newer (higher _rev). Covers browsers and
+   contexts where BroadcastChannel / 'storage' events do not reach other
+   tabs — notably some mobile browsers on file://. applyRemote() ignores
+   anything not newer than the current _rev, and the TV only flashes /
+   dings / announces when callSeq actually advances — so polling can never
+   cause echo loops or double announcements.
+   ===================================================================== */
+setInterval(function () {
+  try {
+    var raw = localStorage.getItem(LS_KEY);
+    if (!raw) return;
+    var remote = JSON.parse(raw);
+    if (remote && (remote._rev || 0) > (state._rev || 0)) applyRemote(remote);
+  } catch (e) { /* ignore */ }
+}, 1000);
+</script>
+</body>
+</html>
