@@ -315,11 +315,13 @@
 
       <div class="card">
         <div class="secTitle" style="margin-top:0;">Cloud sync (Supabase)</div>
-        <p class="muted">Optional. Paste the clinic's Supabase project details to enable live sync later. Demo works fully without it.</p>
+        <p class="muted">Paste the clinic's Supabase project details once — then the phone and the TV sync across devices over the internet. The same Clinic code must be entered on every device. Without this, the demo still works fully, but only between tabs on one device.</p>
         <label class="field" for="setSbUrl">Project URL</label>
         <input class="txt" id="setSbUrl" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off">
         <label class="field" for="setSbKey">Anon key</label>
         <input class="txt" id="setSbKey" type="text" placeholder="eyJhbGciOi…" autocomplete="off">
+        <label class="field" for="setSbCode">Clinic code (same on phone and TV)</label>
+        <input class="txt" id="setSbCode" type="text" placeholder="dr-qaiser" autocomplete="off">
         <button class="btn line block" id="btnSaveCloud" style="margin-top:12px;">Save cloud settings</button>
         <p class="muted" id="cloudStatus" style="margin-top:10px;"></p>
       </div>
@@ -430,7 +432,7 @@ var DEFAULTS = {
   lastCalled: [],          // { n, room, at } most-recent first
   callSeq: 0,              // increments on EVERY call action (TV flash/ding trigger)
   day: todayStr(),
-  cloud: { url: '', key: '' },  // Supabase config (stored only in v0.1)
+  cloud: { url: '', key: '', code: 'dr-qaiser' },  // Supabase config for live cross-device sync
   _rev: 0                  // internal revision for cross-tab sync
 };
 
@@ -443,8 +445,8 @@ function normalizeState(s) {
   var out = {}, k;
   for (k in DEFAULTS) out[k] = DEFAULTS[k];
   if (s && typeof s === 'object') for (k in s) out[k] = s[k];
-  out.cloud = { url: '', key: '' };
-  if (s && s.cloud) { out.cloud.url = s.cloud.url || ''; out.cloud.key = s.cloud.key || ''; }
+  out.cloud = { url: '', key: '', code: 'dr-qaiser' };
+  if (s && s.cloud) { out.cloud.url = s.cloud.url || ''; out.cloud.key = s.cloud.key || ''; out.cloud.code = s.cloud.code || 'dr-qaiser'; }
   if (!Array.isArray(out.tokens)) out.tokens = [];
   if (!Array.isArray(out.lastCalled)) out.lastCalled = [];
   return out;
@@ -493,24 +495,88 @@ function save() {
 function applyRemote(remote) {
   if (!remote || typeof remote !== 'object') return;
   if ((remote._rev || 0) <= (state._rev || 0)) return; // stale or our own echo
+  var localCloud = state.cloud; // cloud config is per-device setup: a remote state must never overwrite it
   state = normalizeState(remote);
+  if (localCloud && (localCloud.url || localCloud.key)) state.cloud = localCloud;
   persistOnly(); // keep local copy fresh WITHOUT re-broadcasting (avoids loops)
   if (IS_TV) { tvGotState = true; tvLastUpdateAt = Date.now(); } // TV status pill (Section 8)
   renderAll();
 }
 
 /* =====================================================================
-   SECTION 3 — Cloud sync hook (Supabase) — NOT implemented in v0.1
-   TODO(next step): when state.cloud.url + state.cloud.key are set, push
-   state changes to a Supabase table and subscribe to Realtime updates so
-   the phone and the TV on DIFFERENT devices stay in sync. Until then the
-   demo sync (Section 2) handles same-device tabs.
+   SECTION 3 — Cloud sync (Supabase) — LIVE since v0.3
+   One row per clinic in table `clinic_state` (clinic_code -> full state
+   JSON; setup SQL in ../supabase-setup.sql). Every save() pushes the
+   state (debounced upsert over REST); a poll loop pulls the row every
+   2 seconds and hands newer states to applyRemote() — the same door the
+   tab sync uses, so the TV flash / chime / voice logic is shared.
+   Designed for ONE controlling device (the doctor's phone) plus any
+   number of displays: last writer wins, and the _rev guard stops a
+   stale state from ever rolling the queue backwards.
    ===================================================================== */
-function cloudSync(/* s */) {
-  return false;
+var cloudPushTimer = null, cloudPushing = false, cloudDirty = false, cloudOnline = null;
+function clinicCode() {
+  return (state.cloud && state.cloud.code) || 'dr-qaiser';
 }
 function cloudConfigured() {
   return !!(state.cloud && state.cloud.url && state.cloud.key);
+}
+function cloudUrl() {
+  return state.cloud.url.replace(/\/+$/, '') + '/rest/v1/clinic_state';
+}
+function cloudHeaders() {
+  return { 'apikey': state.cloud.key, 'Authorization': 'Bearer ' + state.cloud.key, 'Content-Type': 'application/json' };
+}
+function cloudStatusText() {
+  if (!cloudConfigured()) return 'Demo mode — no cloud config saved. The demo syncs between tabs on this device only.';
+  if (cloudOnline === false) return 'Live mode (Supabase) — clinic code "' + clinicCode() + '" — cannot reach the cloud right now (check URL/key + internet); retrying automatically.';
+  return 'Live mode (Supabase) — clinic code "' + clinicCode() + '". Phone and TV on different devices now sync through the internet.';
+}
+function renderCloudStatus() {
+  var el = $('cloudStatus');
+  if (el) el.textContent = cloudStatusText();
+}
+function cloudSync(/* s */) {
+  if (!cloudConfigured()) return false;
+  if (cloudPushTimer) clearTimeout(cloudPushTimer);
+  cloudPushTimer = setTimeout(pushCloud, 350);
+  return true;
+}
+function pushCloud() {
+  if (!cloudConfigured()) return;
+  if (cloudPushing) { cloudDirty = true; return; }
+  cloudPushing = true;
+  var body = JSON.stringify({ clinic_code: clinicCode(), state: state, updated_at: new Date().toISOString() });
+  fetch(cloudUrl(), {
+    method: 'POST',
+    headers: Object.assign(cloudHeaders(), { 'Prefer': 'resolution=merge-duplicates' }),
+    body: body
+  }).then(function (r) {
+    cloudOnline = !!r.ok;
+    if (!r.ok) cloudDirty = true;
+  }).catch(function () {
+    cloudOnline = false; cloudDirty = true;
+  }).then(function () {
+    cloudPushing = false;
+    renderCloudStatus();
+    if (cloudDirty) { cloudDirty = false; setTimeout(pushCloud, 1000); }
+  });
+}
+function pullCloud() {
+  if (!cloudConfigured()) return;
+  var q = cloudUrl() + '?clinic_code=eq.' + encodeURIComponent(clinicCode()) + '&select=state';
+  fetch(q, { headers: cloudHeaders() }).then(function (r) {
+    return r.ok ? r.json() : null;
+  }).then(function (rows) {
+    if (rows && rows.length && rows[0] && rows[0].state) {
+      var wasOffline = cloudOnline === false;
+      cloudOnline = true;
+      applyRemote(rows[0].state);
+      if (wasOffline) renderCloudStatus();
+    }
+  }).catch(function () {
+    if (cloudOnline !== false) { cloudOnline = false; renderCloudStatus(); }
+  });
 }
 
 /* =====================================================================
@@ -699,7 +765,7 @@ function statusChip(st) {
 function renderBar() {
   $('barClinic').textContent = state.clinicName;
   $('barMode').textContent = cloudConfigured()
-    ? 'Live mode (Supabase) — sync coming in next step'
+    ? 'Live mode (Supabase) — syncs across devices'
     : 'Demo mode — syncs between tabs on this device';
 }
 function renderCall() {
@@ -770,7 +836,7 @@ function renderQueue() {
 function renderSettings() {
   var map = [
     ['setClinic', state.clinicName], ['setRoom', state.roomName],
-    ['setSbUrl', state.cloud.url], ['setSbKey', state.cloud.key]
+    ['setSbUrl', state.cloud.url], ['setSbKey', state.cloud.key], ['setSbCode', state.cloud.code]
   ];
   map.forEach(function (pair) {
     var el = $(pair[0]);
@@ -779,9 +845,7 @@ function renderSettings() {
   var lang = $('setLang'); if (lang && document.activeElement !== lang) lang.value = state.lang;
   var tvv = $('setTvVoice'); if (tvv) tvv.checked = !!state.tvVoice;
   var chm = $('setChime'); if (chm) chm.checked = state.chime !== false;
-  $('cloudStatus').textContent = cloudConfigured()
-    ? 'Live mode (Supabase) — sync coming in next step. Config is saved; demo sync is still same-device for now.'
-    : 'Demo mode — no cloud config saved. The demo syncs between tabs on this device only.';
+  renderCloudStatus();
 }
 function renderAll() {
   if (IS_TV) { renderTV(); return; }
@@ -932,7 +996,9 @@ function wireApp() {
   $('btnSaveCloud').addEventListener('click', function () {
     state.cloud.url = $('setSbUrl').value.trim();
     state.cloud.key = $('setSbKey').value.trim();
+    state.cloud.code = $('setSbCode').value.trim() || 'dr-qaiser';
     save();
+    pullCloud();
     renderAll();
     toast(cloudConfigured() ? 'Cloud settings saved' : 'Cloud settings cleared');
   });
@@ -1010,6 +1076,12 @@ setInterval(function () {
     if (remote && (remote._rev || 0) > (state._rev || 0)) applyRemote(remote);
   } catch (e) { /* ignore */ }
 }, 1000);
+
+/* Cloud pull loop (Section 3): when a Supabase config is saved, fetch the
+   clinic's row every 2 seconds — this is what carries state between
+   DIFFERENT devices (phone -> cloud -> TV). */
+setInterval(pullCloud, 2000);
+if (cloudConfigured()) pullCloud();
 </script>
 </body>
 </html>

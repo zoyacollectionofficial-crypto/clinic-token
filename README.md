@@ -72,10 +72,35 @@ A new calendar day automatically starts a fresh queue; **More → Start new day 
   polling fallback also applies newer state in browsers where tab events
   don't arrive.
 
+---
+
+## Live sync across devices (Supabase) — phone ⇄ TV on different devices
+
+Without a cloud config, sync is same-device tabs only. To make the phone and
+the TV sync over the internet (this is the mode a real clinic uses):
+
+1. Create a free project at [supabase.com](https://supabase.com) (any name,
+   e.g. `clinic-token`).
+2. In the project: **SQL Editor → New query**, paste the contents of
+   `supabase-setup.sql` (repository root) and **Run**.
+3. In the project: **Settings → API** — copy the **Project URL** and the
+   **anon public key**.
+4. On the **phone**: open the app link → **More → Cloud sync (Supabase)** →
+   paste URL + anon key, keep Clinic code `dr-qaiser` (or pick your own),
+   tap **Save cloud settings**. The status line should say *Live mode*.
+5. On the **TV's browser**: open the same app link once (the normal view, not
+   the TV link), enter the **same** URL + key + clinic code the same way,
+   then open the TV display from that browser. One-time setup per device.
+6. From now on: every token/call on the phone reaches the TV within about
+   2 seconds, with the flash, ting-tong and (if enabled) the voice.
+
 ## Known limitations of the demo
 
-- Sync is **same browser, same device only** (tabs). Phone-to-TV on *different*
-  devices needs the Supabase live mode (next step) or hosting both views on one PC.
+- Without the Supabase config above, sync is **same browser, same device
+  only** (tabs) — a TV on a different device will NOT update on its own.
+- Live mode is designed for ONE controlling device (the doctor's phone) plus
+  any number of displays. The anon key is shared by design in this demo
+  mode; per-clinic logins come with the sellable version.
 - Printing uses the browser's print dialog; there is no direct Bluetooth printing yet.
 - Urdu speech quality depends on the device having an Urdu TTS voice; without one it
   falls back silently (English still plays in "Both" mode).
@@ -89,11 +114,7 @@ A new calendar day automatically starts a fresh queue; **More → Start new day 
 
 ## What comes next
 
-1. **Supabase live sync** — paste a Supabase Project URL + anon key in
-   More → Cloud sync, and phone/TV sync across devices over the internet
-   (the `cloudSync()` hook in the code is ready; the UI already stores the config
-   and shows "Live mode (Supabase) — sync coming in next step").
-2. **Bluetooth ESC/POS printer app** — one-tap token-slip printing on 58mm thermal
+1. **Bluetooth ESC/POS printer app** — one-tap token-slip printing on 58mm thermal
    printers without the print dialog.
-3. Per-clinic accounts for selling to multiple clinics (Phase 3 of the plan),
+2. Per-clinic accounts for selling to multiple clinics (Phase 3 of the plan),
    reports (patients/day, no-shows, average wait), and an offline local-Wi-Fi mode.
