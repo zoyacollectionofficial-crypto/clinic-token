@@ -306,6 +306,10 @@
           <input type="checkbox" id="setTvVoice">
           <span>Voice announcement on the TV display too</span>
         </label>
+        <label class="checkRow">
+          <input type="checkbox" id="setChime" checked>
+          <span>Ting-tong chime before each announcement</span>
+        </label>
         <button class="btn primary block" id="btnOpenTv2">📺 Open TV display</button>
       </div>
 
@@ -419,6 +423,7 @@ var DEFAULTS = {
   roomName: "Doctor's Room",
   lang: 'both',            // 'ur' | 'en' | 'both'
   tvVoice: false,          // voice announcement on TV (toggle in Settings)
+  chime: true,             // ting-tong chime before announcements (toggle in Settings)
   nextNumber: 1,
   current: null,           // token number currently at the desk
   tokens: [],              // { n, name, status: waiting|called|done|noshow, issuedAt, calledAt }
@@ -563,18 +568,34 @@ function ensureAudio() {
 }
 function ding() {
   if (!audioUnlocked || !audioCtx) return;
+  if (state.chime === false) return;
   try {
     var t = audioCtx.currentTime;
-    [[880, 0], [1318.5, 0.16]].forEach(function (pair) {
+    // Classic two-tone clinic chime: "ting" (high) then "tong" (lower),
+    // each a soft bell with a slow decay — about 1.1 seconds in total.
+    [[1318.5, 0], [1046.5, 0.38]].forEach(function (pair) {
       var o = audioCtx.createOscillator(), g = audioCtx.createGain();
       o.type = 'sine'; o.frequency.value = pair[0];
       g.gain.setValueAtTime(0.0001, t + pair[1]);
-      g.gain.exponentialRampToValueAtTime(0.22, t + pair[1] + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + pair[1] + 0.38);
+      g.gain.exponentialRampToValueAtTime(0.25, t + pair[1] + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + pair[1] + 0.65);
       o.connect(g); g.connect(audioCtx.destination);
-      o.start(t + pair[1]); o.stop(t + pair[1] + 0.42);
+      o.start(t + pair[1]); o.stop(t + pair[1] + 0.7);
     });
   } catch (e) { /* ignore */ }
+}
+
+/* Chime first, THEN the voice — the classic clinic sequence, so the
+   announcement never talks over the ting-tong. If a newer call happens
+   while the chime is playing, only the newest call gets announced. */
+function chimeThenAnnounce(n) {
+  var seq = state.callSeq;
+  ding();
+  setTimeout(function () {
+    if (state.callSeq !== seq) return;
+    if (state.current !== n) return;
+    announce(n);
+  }, state.chime === false ? 0 : 1150);
 }
 
 /* =====================================================================
@@ -598,7 +619,11 @@ function registerCall(token) {
 }
 function maybeAnnounceHere(n) {
   var chk = $('chkSayHere');
-  if (chk && chk.checked) announce(n);
+  if (chk && chk.checked) {
+    ensureAudio();       // runs inside a button tap, so WebAudio may start here
+    audioUnlocked = true;
+    chimeThenAnnounce(n);
+  }
 }
 function callNext() {
   var w = waitingTokens();
@@ -753,6 +778,7 @@ function renderSettings() {
   });
   var lang = $('setLang'); if (lang && document.activeElement !== lang) lang.value = state.lang;
   var tvv = $('setTvVoice'); if (tvv) tvv.checked = !!state.tvVoice;
+  var chm = $('setChime'); if (chm) chm.checked = state.chime !== false;
   $('cloudStatus').textContent = cloudConfigured()
     ? 'Live mode (Supabase) — sync coming in next step. Config is saved; demo sync is still same-device for now.'
     : 'Demo mode — no cloud config saved. The demo syncs between tabs on this device only.';
@@ -813,8 +839,10 @@ function renderTV() {
     card.classList.remove('flash');
     void card.offsetWidth; // restart the CSS animation
     card.classList.add('flash');
-    ding();
-    if (state.tvVoice && audioUnlocked && state.current != null) announce(state.current);
+    if (audioUnlocked && state.current != null) {
+      if (state.tvVoice) chimeThenAnnounce(state.current);
+      else ding();
+    }
   }
   updateTvStatus();
 }
@@ -900,6 +928,7 @@ function wireApp() {
   $('setRoom').addEventListener('input', function () { state.roomName = this.value; save(); renderCall(); });
   $('setLang').addEventListener('change', function () { state.lang = this.value; save(); });
   $('setTvVoice').addEventListener('change', function () { state.tvVoice = this.checked; save(); });
+  $('setChime').addEventListener('change', function () { state.chime = this.checked; save(); });
   $('btnSaveCloud').addEventListener('click', function () {
     state.cloud.url = $('setSbUrl').value.trim();
     state.cloud.key = $('setSbKey').value.trim();

@@ -27,7 +27,7 @@ the demo syncs between **tabs of the same browser**.
 5. Go to the **Tokens** tab → type an optional patient name → **New Token** a few times
    (tokens 1, 2, 3…). Use **Print slip** if you want the paper token.
 6. Back on the **Call** tab → press **Call next**.
-   - The TV tab instantly flashes the new number with a ding, and shows the
+   - The TV tab instantly flashes the new number with a ting-tong chime, and shows the
      patient's name under the room name (when a name was entered).
    - With "Say the call on this device too" ticked, this device speaks the
      token **and the patient name** (when a name was entered), e.g.:
@@ -54,12 +54,17 @@ A new calendar day automatically starts a fresh queue; **More → Start new day 
 - **TV view** (`?view=tv` or `#tv`) — deep-blue full-screen display like the video:
   NOW SERVING / اب باری, big number + room, the current patient's name under the
   room name, LAST CALLED / پچھلے نمبر (last 5), waiting count, live clock,
-  flash + ding on every call, and a small status pill in the footer —
+  flash + ting-tong chime on every call, and a small status pill in the footer —
   **● Live · Last update HH:MM:SS** once it is receiving state, otherwise
   "Waiting for calls…" (with a one-line hint if no state arrives at all).
 - **Voice announcements** — Urdu / English / Both (Settings), on the phone and
   optionally on the TV (toggle in Settings; TV needs the one-time tap first).
   The patient name is spoken too when the token has one.
+- **Ting-tong chime** — a two-tone chime (high → low, about a second) plays
+  BEFORE every announcement, on the TV and on the phone when "say it on this
+  device" is on, so the voice never talks over it. If calls come in rapid
+  succession, only the newest call is announced. Toggle in Settings
+  ("Ting-tong chime before each announcement"), on by default.
 - **Settings** — clinic name, doctor/room name, language, TV voice toggle,
   day reset, and Supabase config fields (URL + anon key) saved for the next step.
 - **Same-device sync** — localStorage + BroadcastChannel (+ storage-event
