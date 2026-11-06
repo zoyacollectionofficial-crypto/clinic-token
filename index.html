@@ -584,9 +584,13 @@ function pullCloud() {
    ===================================================================== */
 function announce(n) {
   if (n == null) return;
-  if (!('speechSynthesis' in window)) return;
+  var hasWebTTS = ('speechSynthesis' in window);
+  // Inside the Android app the WebView has no speechSynthesis — the native
+  // wrapper exposes an AndroidTTS bridge (Android TextToSpeech) instead.
+  var bridge = (!hasWebTTS && window.AndroidTTS && window.AndroidTTS.speak) ? window.AndroidTTS : null;
+  if (!hasWebTTS && !bridge) return;
   try {
-    window.speechSynthesis.cancel();
+    if (hasWebTTS) window.speechSynthesis.cancel();
     var room = state.roomName;
     // Include the patient name when this token has one (both languages);
     // without a name the wording stays exactly as before.
@@ -598,6 +602,12 @@ function announce(n) {
     var enText = pname
       ? 'Token number ' + n + ', ' + pname + '. Please proceed to the ' + room + '.'
       : 'Token number ' + n + '. Please proceed to the ' + room + '.';
+    if (bridge) {
+      bridge.stop();
+      if (state.lang === 'ur' || state.lang === 'both') bridge.speak(urText, 'ur-PK');
+      if (state.lang === 'en' || state.lang === 'both') bridge.speak(enText, 'en-US');
+      return;
+    }
     var mk = function (text, lang) {
       var u = new SpeechSynthesisUtterance(text);
       u.lang = lang; u.rate = 0.95;
