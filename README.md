@@ -118,3 +118,12 @@ the TV sync over the internet (this is the mode a real clinic uses):
    printers without the print dialog.
 2. Per-clinic accounts for selling to multiple clinics (Phase 3 of the plan),
    reports (patients/day, no-shows, average wait), and an offline local-Wi-Fi mode.
+
+## Android app (APK)
+
+The same live web app also runs as an Android app: a thin WebView wrapper
+loads the hosted link, so web updates reach the app automatically. Because
+Android WebView has no `speechSynthesis`, the wrapper exposes a native
+`AndroidTTS` bridge (Android TextToSpeech) and `announce()` uses it when
+the browser voice is missing — the ting-tong chime (WebAudio) works as-is.
+Build files live in `~/workspace/apk-apps/` (manual aapt2/kotlinc pipeline).
