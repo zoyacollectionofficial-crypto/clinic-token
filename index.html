@@ -1044,6 +1044,36 @@ function wireTV() {
   }, 6000);
 }
 
+/* =====================================================================
+   One-tap cloud setup link: opening the app with #setup=<base64url JSON
+   {"u":url,"k":anonKey,"c":clinicCode}> saves that Supabase config on
+   THIS device, then cleans the link from the address bar. A clinic can
+   configure the phone and the TV by simply opening a prepared link on
+   each — no typing of the long anon key. The #fragment is never sent
+   to any server.
+   ===================================================================== */
+function applySetupLink() {
+  var m = /#setup=([A-Za-z0-9\-_]+)/.exec(window.location.hash || '');
+  if (!m) return false;
+  try {
+    var b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    var cfg = JSON.parse(window.atob(b64));
+    if (!cfg || !cfg.u || !cfg.k) return false;
+    state.cloud = {
+      url: String(cfg.u).trim(),
+      key: String(cfg.k).trim(),
+      code: String(cfg.c || 'dr-qaiser').trim() || 'dr-qaiser'
+    };
+    save();
+    try {
+      history.replaceState(null, '', window.location.pathname + window.location.search + (IS_TV ? '#tv' : ''));
+    } catch (e) { /* ignore */ }
+    return true;
+  } catch (e) { return false; }
+}
+var setupApplied = applySetupLink();
+
 // Boot: pick the mode from the URL, wire events, first render.
 if (IS_TV) {
   $('appView').classList.add('hidden');
@@ -1058,6 +1088,7 @@ if (IS_TV) {
   switchView('call');
 }
 renderAll();
+if (setupApplied && !IS_TV) toast('Live sync ON — clinic code "' + clinicCode() + '"');
 
 /* =====================================================================
    Polling fallback (all views): re-read localStorage about once a second
